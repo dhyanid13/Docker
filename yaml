@@ -163,11 +163,8 @@ static_resources:
 
 
 
-transport_socket:
-      name: envoy.transport_sockets.tls
-    typed_extension_protocol_options:
-      envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
-        explicit_http_config:
-          http_proxy:
-            host: "<firm_proxy_address>"
-            port: <firm_proxy_port>
+transport_socket:  # Ensure secure communication with the firm's proxy
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: login.microsoftonline.com
