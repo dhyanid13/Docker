@@ -5,3 +5,9 @@ Served as a peer advisor for TAP graduates in the TAP training program, helping 
 
 In the coming year, I aim to deepen my knowledge and skills in Kubernetes. I plan to pursue relevant certifications, including KCNA, CKAD, and CKA, to validate my proficiency and enhance my contributions to the firm.
 I would like to learn and understand more about service mesh to broaden my expertise in cloud-native technologies.
+
+API Management: Designed, implemented, and enhanced REST APIs for Plexus endpoints to support internal operations and facilitate self-service cluster creation.
+Data Reporting: Integrated Kafka with internal systems to streamline hygiene reporting processes and manage cluster lifecycle data, enabling comprehensive operational reports.
+Self-Service Pipeline Migration: Led the migration from Jenkins to Cloud-Deploy, overseeing the transition from development testing to production setup and implementing logging for monitoring.
+On-Prem Application Migration: Spearheaded the initiative to move the on-prem Plexus application to MKS.
+Client Support: Assisted clients with maintenance requests, addressed bugs, and provided ongoing support for Kubernetes clusters to ensure optimal performance and satisfaction.
