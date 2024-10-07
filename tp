@@ -19,3 +19,61 @@ Whenever new features are introduced, he ensures that they are fully compliant w
 
 In situations where violations or risks are identified, he immediately addresses them, reinforcing that controls and adherence to Firm policy are always prioritized. His proactive efforts in managing risks and ensuring compliance reflect his deep commitment to upholding the Firm’s risk strategy.
 
+
+
+Self-Evaluation: Performance and Impact
+API Management:
+I successfully designed, implemented, and enhanced REST APIs for Plexus endpoints, which played a pivotal role in supporting internal operations and enabling self-service Kubernetes cluster creation. This not only streamlined the process but also empowered teams to independently manage their environments, reducing operational dependencies.
+
+Data Reporting:
+I integrated Kafka with internal systems, optimizing the hygiene reporting process and managing cluster lifecycle data. This integration provided the team with comprehensive operational reports, allowing for better data-driven decision-making and enhanced system monitoring.
+
+Self-Service Pipeline Migration:
+I led the migration from Jenkins to Cloud-Deploy, overseeing the entire transition from development testing to production setup. I also implemented logging mechanisms for monitoring, ensuring smooth deployment processes and improved system visibility.
+
+On-Prem Application Migration:
+I spearheaded the initiative to migrate the on-prem Plexus application to MKS, ensuring a seamless transition to the cloud environment. This migration improved scalability and efficiency across the team’s operations.
+
+Client Support:
+I consistently provided client support by handling maintenance requests, addressing bugs, and ensuring optimal performance of Kubernetes clusters. My contributions ensured client satisfaction and operational stability.
+
+Culture and Values
+Global Volunteer Month:
+I actively contributed to Morgan Stanley’s give-back value by participating in Global Volunteer Month, where I developed word games for young adults with special needs. This initiative allowed me to give back to the community while aligning with the firm’s values of social responsibility.
+
+Tech Philanthropy Codethon:
+As part of Morgan Stanley’s Tech Philanthropy Codethon, I leveraged technology to support charitable initiatives, helping further the firm’s social impact strategy. It was a rewarding experience that showcased the positive impact technology can have in addressing social needs.
+
+Peer Advisor Role:
+In my role as a peer advisor for TAP graduates, I helped create an inclusive and supportive environment by setting up regular catch-up calls and offering guidance throughout their training. This initiative helped foster a sense of belonging and promoted their professional development.
+
+Learning and Development Goals
+Over the next year, I plan to deepen my knowledge in Kubernetes and cloud-native technologies. I aim to pursue relevant certifications, such as KCNA, CKAD, and CKA, to enhance my proficiency and better contribute to the firm’s goals. Additionally, I plan to expand my expertise in service mesh technology, which will allow me to further support cloud-native infrastructure and improve operational efficiency.
+
+This self-evaluation demonstrates a balance between your contributions, how you align with company values, and your proactive approach to continuous learning and development.
+
+
+
+
+
+
+You said:
+now I want to write about my personal feedback on risk and controls the understanding of, the adherence to, the letter and spirit of firm's compliance, risk management, controls, standards other polices laws and regulations - i have actively contributed to hygine reporting to how does that work align with this 
+ChatGPT said:
+ChatGPT
+Here's how you can articulate your personal feedback on risk and controls in relation to your work in hygiene reporting:
+
+Personal Feedback on Risk and Controls
+Understanding and adhering to the firm's compliance, risk management, and control standards is critical to maintaining the integrity of our operations at Morgan Stanley. I have actively contributed to hygiene reporting processes, which aligns closely with our commitment to these principles.
+
+Risk Management and Hygiene Reporting
+By integrating Kafka with our internal systems to streamline hygiene reporting, I have directly supported our risk management framework. Effective hygiene reporting is essential for identifying potential risks associated with cluster lifecycle management, ensuring that we can proactively address any issues that may arise. This initiative not only enhances operational efficiency but also strengthens our ability to comply with the firm's standards and regulatory requirements.
+
+Adherence to Compliance Standards
+My contributions to hygiene reporting also reflect my commitment to adhering to the letter and spirit of the firm's compliance policies. By ensuring that data reporting is accurate, timely, and transparent, I help uphold our accountability standards and contribute to a culture of compliance within the organization. This alignment is crucial for mitigating risks and ensuring that all operational activities are conducted in accordance with established guidelines and regulations.
+
+Commitment to Controls and Standards
+Through my work, I have consistently emphasized the importance of implementing robust controls within our processes. By designing comprehensive reporting mechanisms, I contribute to the establishment of checks and balances that enhance our risk management efforts. This proactive approach to controls not only helps protect the firm from potential risks but also fosters trust and confidence among our clients and stakeholders.
+
+In summary, my active involvement in hygiene reporting is a testament to my understanding of, and commitment to, the firm's compliance, risk management, and control standards. I will continue to prioritize these principles in my work to ensure that we uphold the highest levels of integrity and accountability in all our operations.
+
