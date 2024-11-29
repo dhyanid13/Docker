@@ -105,54 +105,98 @@ Additionally, I will work on balancing my desire to deliver work quickly with en
 
 I often find it challenging to manage multiple critical tasks simultaneously. To improve my efficiency, I will work on developing better task prioritization techniques. By mastering this skill, I aim to handle competing priorities more effectively, ensuring that I can meet project goals without compromising quality.
 
-import re
 import logging
-from typing import List, Dict
+import re
+from typing import Optional, List, Dict
 from pydantic import BaseModel
-from jsonschema import validate as validate_json
-from jsonschema.exceptions import ValidationError as JsonValidationError, SchemaError as JsonSchemaError
+from jsonschema import Draft202012Validator, ValidationError as JsonValidationError
+from jsonschema.validators import validate as validate_json
+from .configuration import settings
 
 logger = logging.getLogger(__name__)
 
 class Kind(BaseModel):
-    """Represents a task kind with schema and ACLs."""
     task_schema: dict
     producer_acls: List[str]
     consumer_acls: List[str]
 
-    def validate_task(self, payload):
+    def validate_task(self, payload: dict) -> bool:
         """Validate a task payload against the schema for this kind."""
         try:
             validate_json(payload, self.task_schema)
-        except JsonValidationError:
+        except JsonValidationError as e:
+            logger.warning("Task payload validation failed: %s", e)
             return False
         return True
 
 
 class KindRegistry:
-    """Registry of all known task kinds loaded from settings."""
+    """Registry for managing and validating task kinds."""
 
-    def __init__(self, kinds: Dict[str, Kind]):
-        self._kinds = kinds
+    @staticmethod
+    def get(kind_name: str) -> Optional[Kind]:
+        """
+        Retrieve the Kind configuration for a given task kind.
 
-    def get(self, kind_name):
-        """Retrieve a kind by name."""
-        return self._kinds.get(kind_name)
+        Args:
+            kind_name (str): The name of the kind to retrieve.
 
-    def validate_all(self):
-        """Validate all kinds' schemas."""
-        success = True
-        for kind_name, kind_data in self._kinds.items():
-            if not re.fullmatch(r"[a-z][a-z0-9]+", kind_name):
-                logger.warning("Invalid kind name: %s", kind_name)
-                success = False
+        Returns:
+            Optional[Kind]: The kind object if found, else None.
+        """
+        kind = settings.kinds.get(kind_name)
+        if not kind:
+            logger.warning("Kind '%s' not found in the configuration.", kind_name)
+        return kind
 
-            try:
-                from jsonschema import Draft202012Validator
-                Draft202012Validator.check_schema(kind_data.task_schema)
-            except JsonSchemaError as e:
-                logger.warning("Schema validation failed for kind %s: %s", kind_name, e)
-                success = False
-        return success
+    @staticmethod
+    def validate_kind_name(kind_name: str) -> bool:
+        """
+        Validate the format of a kind name.
 
+        Args:
+            kind_name (str): The name of the kind to validate.
 
+        Returns:
+            bool: True if the kind name is valid, False otherwise.
+        """
+        if re.fullmatch(r"[a-z][a-z0-9]+", kind_name):
+            return True
+        logger.warning("Kind name '%s' is not conformant.", kind_name)
+        return False
+
+    @staticmethod
+    def validate_schema(kind: Kind) -> bool:
+        """
+        Validate the task schema of a given kind.
+
+        Args:
+            kind (Kind): The Kind object whose schema needs validation.
+
+        Returns:
+            bool: True if the schema is valid, False otherwise.
+        """
+        try:
+            Draft202012Validator.check_schema(kind.task_schema)
+            return True
+        except JsonValidationError as e:
+            logger.warning("Schema validation error for kind '%s': %s", kind, e)
+        return False
+
+    @staticmethod
+    def validate_task_payload(kind_name: str, payload: dict) -> bool:
+        """
+        Validate a task payload against the schema for the specified kind.
+
+        Args:
+            kind_name (str): The name of the kind.
+            payload (dict): The task payload to validate.
+
+        Returns:
+            bool: True if the payload is valid, False otherwise.
+        """
+        kind = KindRegistry.get(kind_name)
+        if not kind:
+            return False
+
+        return kind.validate_task(payload)
