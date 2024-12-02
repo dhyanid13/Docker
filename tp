@@ -200,3 +200,52 @@ class KindRegistry:
             return False
 
         return kind.validate_task(payload)
+
+
+
+
+import os
+import logging
+from typing import Dict, Optional
+from pydantic import BaseModel, ValidationError
+from jsonschema import Draft202012Validator, validate as validate_json
+from jsonschema.exceptions import ValidationError as JsonValidationError, SchemaError as JsonSchemaError
+
+from .configuration import settings
+
+logger = logging.getLogger(__name__)
+
+class Kind(BaseModel):
+    task_schema: dict
+    producer_acls: list[str]
+    consumer_acls: list[str]
+
+    def validate_task(self, payload: dict) -> bool:
+        """Validate a task payload against the schema for this kind"""
+        try:
+            validate_json(payload, self.task_schema)
+        except JsonValidationError:
+            logger.error("Task validation failed for payload: %s", payload)
+            return False
+        return True
+
+
+class KindRegistry:
+    """Registry of all known task kinds"""
+
+    def __init__(self, kinds: Dict[str, Kind]):
+        self._kinds = kinds  # The kinds are now passed as a dictionary.
+    
+    def get(self, kind_name: str) -> Optional[Kind]:
+        """Get the Kind configuration for a given task kind."""
+        return self._kinds.get(kind_name)
+
+    def reload(self):
+        """Reloads the kinds from the settings configuration."""
+        self._kinds = settings.kinds  # The kinds are now directly available from the settings.
+        logger.info("Kinds registry reloaded")
+
+
+# Initialize the KindRegistry with the kinds loaded from settings.
+kind_registry = KindRegistry(settings.kinds)
+
