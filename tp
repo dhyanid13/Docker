@@ -249,3 +249,51 @@ class KindRegistry:
 # Initialize the KindRegistry with the kinds loaded from settings.
 kind_registry = KindRegistry(settings.kinds)
 
+
+
+import logging
+import re
+from typing import Dict, Optional
+from jsonschema import Draft202012Validator, ValidationError as JsonValidationError
+from .configuration import settings, Kind  # Import Kind from configuration.py
+
+logger = logging.getLogger(__name__)
+
+class KindRegistry:
+    """Registry of all known task kinds"""
+
+    def __init__(self, kinds: Dict[str, Kind]):
+        self._kinds = kinds  # The kinds are passed directly from the settings.
+        self.reload()
+
+    def reload(self):
+        """Reloads the kinds from the settings configuration."""
+        success = True
+        self._kinds = settings.kinds  # Reload from settings
+
+        # Validate each kind
+        for kind_name, kind in self._kinds.items():
+            # Validate the name format
+            if not re.fullmatch("[a-z][a-z0-9]+", kind_name):
+                logger.warning("Unable to load kind %s as name is non-conformant", kind_name)
+                success = False
+
+            # Validate the schema
+            try:
+                Draft202012Validator.check_schema(kind.task_schema)  # Validate schema format
+            except JsonValidationError:
+                logger.warning("Unable to load kind %s as schema does not validate", kind_name)
+                success = False
+
+        if success:
+            logger.info("Kinds registry reloaded successfully")
+        else:
+            logger.warning("Some kinds failed to load due to validation errors")
+
+    def get(self, kind_name: str) -> Optional[Kind]:
+        """Get the Kind configuration for a given task kind."""
+        return self._kinds.get(kind_name)
+
+# Initialize the KindRegistry with the kinds loaded from settings
+kind_registry = KindRegistry(settings.kinds)
+
