@@ -59,3 +59,42 @@ def test_kind_bad_config():
         else:
             # File does not exist; pass test as it simulates the "bad file" scenario
             assert True
+
+
+
+def test_kind_bad_config():
+    # List of bad configuration files to test
+    bad_config_files = [
+        'kind_bad_format.json',
+        'kind_bad_json.json',
+        'kind_bad_name.json',
+        'kind_bad_schema.json'
+    ]
+    
+    for fn in bad_config_files:
+        file_path = os.path.join(BINDIR, 'etc', fn)
+        
+        # Check if the file exists
+        assert os.path.exists(file_path), f"Missing configuration file: {fn}"
+        
+        try:
+            # Attempt to load the file
+            with open(file_path, 'r', encoding='utf-8') as f:
+                bad_data = json.load(f)
+            
+            # Validate and populate settings.kinds
+            for kind_name, kind_data in bad_data.get("kinds", {}).items():
+                try:
+                    # Attempt to create a Kind object and assign it
+                    settings.kinds[kind_name] = Kind(**kind_data)
+                except Exception as e:
+                    # Log and assert failures for bad configurations
+                    logger.warning(f"Validation failed for {kind_name} in file {fn}: {e}")
+                    settings.kinds[kind_name] = None
+            
+            # Ensure that the 'test' kind is invalid or not present
+            assert settings.kinds.get('test') is None, f"Invalid configuration passed validation for: {fn}"
+        except json.JSONDecodeError as e:
+            pytest.fail(f"JSON decoding error in file {fn}: {str(e)}")
+        except Exception as e:
+            pytest.fail(f"Unexpected error with file {fn}: {str(e)}")
