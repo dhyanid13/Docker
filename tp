@@ -74,27 +74,30 @@ def test_kind_bad_config():
     for fn in bad_config_files:
         file_path = os.path.join(BINDIR, 'etc', fn)
         
-        # Check if the file exists
+        # Assert that the file exists
         assert os.path.exists(file_path), f"Missing configuration file: {fn}"
         
         try:
-            # Attempt to load the file
+            # Load the JSON data from the file
             with open(file_path, 'r', encoding='utf-8') as f:
                 bad_data = json.load(f)
             
-            # Validate and populate settings.kinds
+            # Validate and populate `settings.kinds`
             for kind_name, kind_data in bad_data.get("kinds", {}).items():
                 try:
-                    # Attempt to create a Kind object and assign it
+                    # Attempt to create a Kind object
                     settings.kinds[kind_name] = Kind(**kind_data)
+                    assert False, f"Invalid configuration for {kind_name} passed validation in file: {fn}"
                 except Exception as e:
-                    # Log and assert failures for bad configurations
-                    logger.warning(f"Validation failed for {kind_name} in file {fn}: {e}")
-                    settings.kinds[kind_name] = None
+                    # Log the expected failure
+                    logger.info(f"Validation correctly failed for {kind_name} in file {fn}: {e}")
             
-            # Ensure that the 'test' kind is invalid or not present
-            assert settings.kinds.get('test') is None, f"Invalid configuration passed validation for: {fn}"
+            # Ensure the 'test' kind remains invalid or unpopulated
+            assert settings.kinds.get('test') is None, f"'test' kind should be invalid in file: {fn}"
         except json.JSONDecodeError as e:
-            pytest.fail(f"JSON decoding error in file {fn}: {str(e)}")
+            logger.error(f"JSON decoding error in file {fn}: {e}")
+            assert False, f"Invalid JSON format in file: {fn}"
         except Exception as e:
-            pytest.fail(f"Unexpected error with file {fn}: {str(e)}")
+            logger.error(f"Unexpected error with file {fn}: {e}")
+            assert False, f"Error processing file {fn}: {e}"
+
