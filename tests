@@ -1,0 +1,133 @@
+import pytest
+
+@pytest.mark.asyncio
+async def test_get_rule_state(client):
+    """Test fetching rule state for a given rule and firewall."""
+    response = await client.get("/rule_state/my_rule/my_firewall")
+    
+    assert response.status_code in [200, 404]
+    if response.status_code == 200:
+        data = response.json()
+        assert data["rule_name"] == "my_rule"
+        assert data["firewall_name"] == "my_firewall"
+        assert "lifecycle" in data  # Ensure lifecycle state is present
+
+@pytest.mark.asyncio
+async def test_get_rule_data(client):
+    """Test fetching subnet data associated with a rule."""
+    response = await client.get("/rule_state/my_rule/my_firewall/data")
+
+    assert response.status_code in [200, 404]
+    if response.status_code == 200:
+        data = response.json()
+        assert isinstance(data["subnets"], list)
+        assert "timestamp" in data
+
+@pytest.mark.asyncio
+async def test_update_rule_state(client):
+    """Test updating rule state with a new timestamp."""
+    payload = {
+        "current_timestamp": "2025-03-03T12:30:00",
+        "rtype": "firewall-rule"
+    }
+
+    response = await client.put("/rule_state/my_rule/my_firewall", json=payload)
+
+    assert response.status_code in [200, 404, 409]
+    if response.status_code == 200:
+        data = response.json()
+        assert data["current_timestamp"] == "2025-03-03T12:30:00"
+
+@pytest.mark.asyncio
+async def test_delete_rule_state(client):
+    """Test deleting a rule state (should only work if it's 'deprecated')."""
+    response = await client.delete("/rule_state/my_rule/my_firewall")
+
+    assert response.status_code in [204, 404, 409]  # 409 if not deprecated
+
+
+import pytest
+
+@pytest.mark.asyncio
+async def test_get_subnets(client):
+    """Test fetching subnets with query parameters."""
+    params = {"kind": "vpc", "cloud": "aws"}
+    response = await client.get("/subnets", params=params)
+
+    assert response.status_code in [200, 404]
+    if response.status_code == 200:
+        assert isinstance(response.json(), list)
+
+@pytest.mark.asyncio
+async def test_get_specific_subnet(client):
+    """Test fetching a subnet by kind, version, and resource key."""
+    response = await client.get("/subnets/vpc/1/resource123")
+
+    assert response.status_code in [200, 404]
+    if response.status_code == 200:
+        assert response.json()[0]["kind"] == "vpc"
+
+@pytest.mark.asyncio
+async def test_update_subnet(client):
+    """Test updating subnet metadata."""
+    payload = {
+        "metadata": {"cloud": "aws", "region": "us-east-1"},
+        "subnets": [{"usage": "app", "cidr": "192.168.1.0/24"}]
+    }
+    
+    response = await client.put("/subnets/vpc/1/resource123", json=payload)
+
+    assert response.status_code in [200, 404]
+    if response.status_code == 200:
+        assert response.json()["affected_rules"]
+
+@pytest.mark.asyncio
+async def test_delete_subnet(client):
+    """Test deleting a subnet."""
+    response = await client.delete("/subnets/vpc/1/resource123")
+
+    assert response.status_code in [204, 404]
+
+import pytest
+from datetime import datetime
+
+@pytest.mark.asyncio
+async def test_get_rule_state(client):
+    """Test fetching a rule's state for a firewall."""
+    response = await client.get("/rule_state/test_rule/test_firewall")
+
+    assert response.status_code in [200, 404]
+    if response.status_code == 200:
+        assert response.json()["rule_name"] == "test_rule"
+        assert response.json()["firewall_name"] == "test_firewall"
+
+@pytest.mark.asyncio
+async def test_get_rule_data(client):
+    """Test fetching subnet data required by a rule."""
+    response = await client.get("/rule_state/test_rule/test_firewall/data")
+
+    assert response.status_code in [200, 404]
+    if response.status_code == 200:
+        assert "subnets" in response.json()
+        assert isinstance(response.json()["subnets"], list)
+
+@pytest.mark.asyncio
+async def test_update_rule_state(client):
+    """Test updating a rule state."""
+    payload = {
+        "current_timestamp": datetime.utcnow().isoformat(),
+        "lifecycle": "active"
+    }
+    
+    response = await client.put("/rule_state/test_rule/test_firewall", json=payload)
+
+    assert response.status_code in [200, 404, 409]  # 409 if timestamp issue
+    if response.status_code == 200:
+        assert response.json()["lifecycle"] == "active"
+
+@pytest.mark.asyncio
+async def test_delete_rule_state(client):
+    """Test deleting a rule state (only if deprecated)."""
+    response = await client.delete("/rule_state/test_rule/test_firewall")
+
+    assert response.status_code in [204, 404, 409]  # 409 if not deprecated
