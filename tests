@@ -1,4 +1,149 @@
 import pytest
+from httpx import AsyncClient
+from unittest.mock import patch
+
+# ✅ Test Data
+VALID_PAYLOAD_AWS = {
+    "metadata": {
+        "cloud": "AWS",
+        "region": "us-west-1",
+        "account_id": "aws-account-12345"
+    },
+    "subnets": [
+        {"cidr": "10.0.0.0/24", "usage": "Node"},
+        {"cidr": "10.0.1.0/24", "usage": "Pod"}
+    ]
+}
+
+VALID_PAYLOAD_AZURE = {
+    "metadata": {
+        "cloud": "Azure",
+        "region": "east-us",
+        "subscription_identifier": "azure-subscription-56789"
+    },
+    "subnets": [
+        {"cidr": "192.168.1.0/24", "usage": "Node"},
+        {"cidr": "192.168.2.0/24", "usage": "Service"}
+    ]
+}
+
+INVALID_PAYLOADS = [
+    (  # ❌ Missing metadata
+        {},
+        400,
+    ),
+    (  # ❌ Missing `cloud` field
+        {"metadata": {"region": "us-west-1", "account_id": "aws-account-12345"}},
+        400,
+    ),
+    (  # ❌ Empty subnets list
+        {"metadata": {"cloud": "AWS", "region": "us-west-1", "account_id": "aws-account-12345"}, "subnets": []},
+        400,
+    ),
+    (  # ❌ Invalid CIDR format
+        {"metadata": {"cloud": "AWS", "region": "us-west-1", "account_id": "aws-account-12345"},
+         "subnets": [{"cidr": "invalid-cidr", "usage": "Node"}]},
+        422,
+    ),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload,expected_status", INVALID_PAYLOADS)
+async def test_update_subnet_invalid_payload(client: AsyncClient, payload, expected_status):
+    response = await client.put("/subnets_query/AWS/1/test-key", json=payload)
+    assert response.status_code == expected_status
+
+
+@pytest.mark.asyncio
+async def test_update_subnet_valid_aws(client: AsyncClient):
+    response = await client.put("/subnets_query/AWS/1/test-key", json=VALID_PAYLOAD_AWS)
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_update_subnet_valid_azure(client: AsyncClient):
+    response = await client.put("/subnets_query/Azure/1/test-key", json=VALID_PAYLOAD_AZURE)
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_update_subnet_unauthorized(client: AsyncClient):
+    response = await client.put("/subnets_query/AWS/1/test-key", json=VALID_PAYLOAD_AWS, headers={})
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_update_subnet_forbidden(client: AsyncClient):
+    with patch("app.auth.verify_permissions", return_value=False):  # Mock permission failure
+        response = await client.put("/subnets_query/AWS/1/test-key", json=VALID_PAYLOAD_AWS)
+        assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_update_subnet_not_found(client: AsyncClient):
+    with patch("app.database.get_subnet", return_value=None):  # Simulate missing resource
+        response = await client.put("/subnets_query/AWS/1/nonexistent-key", json=VALID_PAYLOAD_AWS)
+        assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_subnet_cidr_conflict(client: AsyncClient):
+    conflicting_payload = {
+        "metadata": {
+            "cloud": "AWS",
+            "region": "us-west-1",
+            "account_id": "aws-account-12345"
+        },
+        "subnets": [
+            {"cidr": "10.0.0.0/24", "usage": "Node"},
+            {"cidr": "10.0.0.0/24", "usage": "Pod"}  # Duplicate CIDR
+        ]
+    }
+    response = await client.put("/subnets_query/AWS/1/test-key", json=conflicting_payload)
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_update_subnet_rate_limit(client: AsyncClient):
+    for _ in range(5):  # Simulate rapid requests
+        await client.put("/subnets_query/AWS/1/test-key", json=VALID_PAYLOAD_AWS)
+    
+    response = await client.put("/subnets_query/AWS/1/test-key", json=VALID_PAYLOAD_AWS)
+    assert response.status_code == 429
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import pytest
 
 @pytest.mark.asyncio
 async def test_get_rule_state(client):
