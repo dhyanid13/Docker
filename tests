@@ -1,5 +1,84 @@
 import pytest
 from httpx import AsyncClient
+from ms.plexus.api.firewall.model import RuleImplementationStateDoc
+
+@pytest.mark.anyio
+async def test_get_rule_data_success(http_client: AsyncClient, database_client):
+    """Test fetching rule data when the rule exists."""
+    # Insert a test rule into the mock database
+    rule_name = "allow-ssh"
+    firewall_name = "fw-123"
+
+    rule = RuleImplementationStateDoc(
+        rule_name=rule_name,
+        firewall_name=firewall_name,
+        state={"status": "active", "last_updated": "2025-03-03T12:00:00Z"}
+    )
+    await rule.insert()
+
+    # Make the request
+    response = await http_client.get(f"/{rule_name}/{firewall_name}/data")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["state"]["status"] == "active"
+    assert data["state"]["last_updated"] == "2025-03-03T12:00:00Z"
+
+@pytest.mark.anyio
+async def test_get_rule_data_not_found(http_client: AsyncClient):
+    """Test fetching rule data when the rule does not exist."""
+    response = await http_client.get("/nonexistent-rule/fw-123/data")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Rule not found"
+
+@pytest.mark.anyio
+async def test_get_rule_data_firewall_mismatch(http_client: AsyncClient, database_client):
+    """Test case where the rule exists but is linked to a different firewall."""
+    rule = RuleImplementationStateDoc(
+        rule_name="allow-ssh",
+        firewall_name="fw-456",  # Different firewall
+        state={"status": "active"}
+    )
+    await rule.insert()
+
+    # Query with a different firewall
+    response = await http_client.get("/allow-ssh/fw-123/data")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Rule not found"
+
+@pytest.mark.anyio
+async def test_get_rule_data_db_error(http_client: AsyncClient, monkeypatch):
+    """Simulate a database failure."""
+    async def mock_find_one(*args, **kwargs):
+        raise Exception("Database error")
+
+    monkeypatch.setattr(RuleImplementationStateDoc, "find_one", mock_find_one)
+
+    response = await http_client.get("/allow-ssh/fw-123/data")
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Internal Server Error"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import pytest
+from httpx import AsyncClient
 from unittest.mock import patch
 
 # ✅ Test Data
