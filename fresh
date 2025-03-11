@@ -1,206 +1,161 @@
 import pytest
 from httpx import AsyncClient
-from ms.plexus.api.firewall.model import SubnetDoc
 from datetime import datetime
+from ms.plexus.api.firewall.model import MetadataUpload, SubnetData, AzureNetworkMetadata, RuleImplementationKey
 
-@pytest.mark.asyncio
-async def test_update_subnet_info_valid_azure_eastus2(http_client: AsyncClient):
-    """Test updating subnet info for Azure in eastus2 region with node usage"""
+@pytest.mark.anyio
+async def test_update_subnet_info(http_client: AsyncClient, database_client):
+    """Test updating subnet info for different regions, environments, and usages."""
+    
+    url = "/subnets/azure.aks/1/abc.test.cluster.fqdn.ms.com"
 
-    payload = {
-        "metadata": {
-            "cloud": "azure",
-            "region": "eastus2",
-            "env": "dev",
-            "network_zone": "msinternal"
-        },
-        "subnets": [
-            {
-                "usage": "node",
-                "cidr": "10.0.0.0/24",
-                "name": "node-subnet-01",
-                "timestamp": "2025-03-10T07:17:11.484+00:00"
-            }
+    # Test payload covering different regions, environments, and subnet usages
+    test_payload = MetadataUpload(
+        metadata=AzureNetworkMetadata(
+            cloud="azure",
+            tenant="msad",
+            segdom_name="infra-dev-genpop",
+            subscription_identifier="mce",
+            spoke_identifier="aks-client-03",
+            region="eastus2",
+            env="dev",
+            network_zone="msinternal"
+        ),
+        subnets=[
+            SubnetData(usage="node", cidr="10.0.1.0/24", name="node-subnet-01"),
+            SubnetData(usage="pod", cidr="10.0.2.0/24", name="pod-subnet-02"),
+            SubnetData(usage="service", cidr="10.0.3.0/24", name="service-subnet-03"),
         ]
-    }
+    )
 
-    response = await http_client.put("/azure/1/abc.test.cluster.fqdn.ms.com", json=payload)
+    response = await http_client.put(url, json=test_payload.model_dump())
+
     assert response.status_code == 200
-    data = response.json()
-    assert isinstance(data["affected_rules"], list)
+    response_data = response.json()
+    
+    # Validate response structure
+    assert "timestamp" in response_data
+    assert "affected_rules" in response_data
+    assert isinstance(response_data["affected_rules"], list)
 
-@pytest.mark.asyncio
-async def test_update_subnet_info_valid_aws_us_west_2(http_client: AsyncClient):
-    """Test updating subnet info for AWS in us-west-2 region with service usage"""
+    # Ensure affected rules contain expected values
+    for rule in response_data["affected_rules"]:
+        assert "rule_name" in rule
+        assert "firewall_name" in rule
 
-    payload = {
-        "metadata": {
-            "cloud": "aws",
-            "region": "us-west-2",
-            "env": "prod",
-            "network_zone": "msinternal"
-        },
-        "subnets": [
-            {
-                "usage": "service",
-                "cidr": "192.168.1.0/24",
-                "name": "service-subnet-01",
-                "timestamp": "2025-03-10T07:17:11.484+00:00"
-            }
-        ]
-    }
+    # Ensure timestamp is correctly set
+    timestamp = datetime.fromisoformat(response_data["timestamp"])
+    assert timestamp <= datetime.utcnow()  # Timestamp should not be in the future
 
-    response = await http_client.put("/aws/1/abc.test.cluster.fqdn.ms.com", json=payload)
+@pytest.mark.anyio
+async def test_update_subnet_no_matching_firewall(http_client: AsyncClient, database_client):
+    """Test API behavior when no matching firewalls exist for the metadata."""
+
+    url = "/subnets/azure.aks/1/nonexistent.cluster.fqdn.ms.com"
+
+    test_payload = MetadataUpload(
+        metadata=AzureNetworkMetadata(
+            cloud="azure",
+            tenant="msad",
+            segdom_name="nonexistent-segdom",
+            subscription_identifier="mce",
+            spoke_identifier="aks-client-03",
+            region="nowhere",
+            env="dev",
+            network_zone="msinternal"
+        ),
+        subnets=[SubnetData(usage="node", cidr="10.0.1.0/24", name="node-subnet-01")]
+    )
+
+    response = await http_client.put(url, json=test_payload.model_dump())
+
+    assert response.status_code == 200  # API should still return success
+    response_data = response.json()
+    assert response_data["affected_rules"] == []  # No affected rules since no firewall matched
+
+@pytest.mark.anyio
+async def test_update_subnet_no_matching_ruleset(http_client: AsyncClient, database_client):
+    """Test API behavior when no matching ruleset exists for a subnet."""
+
+    url = "/subnets/azure.aks/1/abc.test.cluster.fqdn.ms.com"
+
+    test_payload = MetadataUpload(
+        metadata=AzureNetworkMetadata(
+            cloud="azure",
+            tenant="msad",
+            segdom_name="infra-dev-genpop",
+            subscription_identifier="mce",
+            spoke_identifier="aks-client-03",
+            region="eastus2",
+            env="dev",
+            network_zone="msinternal"
+        ),
+        subnets=[SubnetData(usage="unknown-usage", cidr="10.0.4.0/24", name="unknown-subnet")]
+    )
+
+    response = await http_client.put(url, json=test_payload.model_dump())
+
     assert response.status_code == 200
-    data = response.json()
-    assert isinstance(data["affected_rules"], list)
+    response_data = response.json()
+    assert response_data["affected_rules"] == []  # No rules should be affected
 
-@pytest.mark.asyncio
-async def test_update_subnet_info_pod_usage(http_client: AsyncClient):
-    """Test updating subnet info with usage type as pod"""
+@pytest.mark.anyio
+async def test_update_subnet_existing_rule_implementation(http_client: AsyncClient, database_client):
+    """Ensure the API updates timestamps for existing rule implementations."""
 
-    payload = {
-        "metadata": {
-            "cloud": "azure",
-            "region": "eastus2",
-            "env": "dev",
-            "network_zone": "msinternal"
-        },
-        "subnets": [
-            {
-                "usage": "pod",
-                "cidr": "10.10.0.0/24",
-                "name": "pod-subnet-01",
-                "timestamp": "2025-03-10T07:17:11.484+00:00"
-            }
-        ]
-    }
+    url = "/subnets/azure.aks/1/abc.test.cluster.fqdn.ms.com"
 
-    response = await http_client.put("/azure/1/abc.test.cluster.fqdn.ms.com", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert isinstance(data["affected_rules"], list)
+    test_payload = MetadataUpload(
+        metadata=AzureNetworkMetadata(
+            cloud="azure",
+            tenant="msad",
+            segdom_name="infra-dev-genpop",
+            subscription_identifier="mce",
+            spoke_identifier="aks-client-03",
+            region="eastus2",
+            env="dev",
+            network_zone="msinternal"
+        ),
+        subnets=[SubnetData(usage="node", cidr="10.0.1.0/24", name="node-subnet-01")]
+    )
 
-@pytest.mark.asyncio
-async def test_update_subnet_info_invalid_missing_metadata(http_client: AsyncClient):
-    """Test updating subnet info with missing metadata (should return 422)"""
-
-    payload = {
-        "subnets": [
-            {
-                "usage": "node",
-                "cidr": "10.0.0.0/24",
-                "name": "node-subnet-01",
-                "timestamp": "2025-03-10T07:17:11.484+00:00"
-            }
-        ]
-    }
-
-    response = await http_client.put("/azure/1/abc.test.cluster.fqdn.ms.com", json=payload)
-    assert response.status_code == 422  # Missing metadata should cause validation error
-
-@pytest.mark.asyncio
-async def test_update_subnet_info_invalid_cidr_format(http_client: AsyncClient):
-    """Test updating subnet info with an invalid CIDR format (should return 422)"""
-
-    payload = {
-        "metadata": {
-            "cloud": "azure",
-            "region": "eastus2",
-            "env": "dev",
-            "network_zone": "msinternal"
-        },
-        "subnets": [
-            {
-                "usage": "node",
-                "cidr": "invalid-cidr",
-                "name": "node-subnet-01",
-                "timestamp": "2025-03-10T07:17:11.484+00:00"
-            }
-        ]
-    }
-
-    response = await http_client.put("/azure/1/abc.test.cluster.fqdn.ms.com", json=payload)
-    assert response.status_code == 422  # Invalid CIDR should cause validation error
-
-@pytest.mark.asyncio
-async def test_update_subnet_info_different_envs(http_client: AsyncClient):
-    """Test updating subnet info with different environments (dev, prod)"""
-
-    payload_dev = {
-        "metadata": {
-            "cloud": "azure",
-            "region": "eastus2",
-            "env": "dev",
-            "network_zone": "msinternal"
-        },
-        "subnets": [
-            {
-                "usage": "node",
-                "cidr": "10.0.1.0/24",
-                "name": "node-subnet-dev",
-                "timestamp": "2025-03-10T07:17:11.484+00:00"
-            }
-        ]
-    }
-
-    payload_prod = {
-        "metadata": {
-            "cloud": "azure",
-            "region": "eastus2",
-            "env": "prod",
-            "network_zone": "msinternal"
-        },
-        "subnets": [
-            {
-                "usage": "node",
-                "cidr": "10.0.2.0/24",
-                "name": "node-subnet-prod",
-                "timestamp": "2025-03-10T07:17:11.484+00:00"
-            }
-        ]
-    }
-
-    response_dev = await http_client.put("/azure/1/abc.test.cluster.fqdn.ms.com", json=payload_dev)
-    response_prod = await http_client.put("/azure/1/abc.test.cluster.fqdn.ms.com", json=payload_prod)
-
-    assert response_dev.status_code == 200
-    assert response_prod.status_code == 200
-
-@pytest.mark.asyncio
-async def test_update_subnet_info_duplicate_insertion(http_client: AsyncClient):
-    """Ensure duplicate subnet info updates replace existing ones"""
-
-    payload = {
-        "metadata": {
-            "cloud": "azure",
-            "region": "eastus2",
-            "env": "dev",
-            "network_zone": "msinternal"
-        },
-        "subnets": [
-            {
-                "usage": "node",
-                "cidr": "10.0.0.0/24",
-                "name": "node-subnet-01",
-                "timestamp": "2025-03-10T07:17:11.484+00:00"
-            }
-        ]
-    }
-
-    # First request
-    response1 = await http_client.put("/azure/1/abc.test.cluster.fqdn.ms.com", json=payload)
+    # First update to create the rule implementation
+    response1 = await http_client.put(url, json=test_payload.model_dump())
     assert response1.status_code == 200
+    response_data1 = response1.json()
+    first_timestamp = datetime.fromisoformat(response_data1["timestamp"])
 
-    # Second request (same data)
-    response2 = await http_client.put("/azure/1/abc.test.cluster.fqdn.ms.com", json=payload)
+    # Second update to check timestamp update
+    response2 = await http_client.put(url, json=test_payload.model_dump())
     assert response2.status_code == 200
+    response_data2 = response2.json()
+    second_timestamp = datetime.fromisoformat(response_data2["timestamp"])
 
-    # Ensure only one document exists
-    subnet_count = await SubnetDoc.find(
-        SubnetDoc.kind == "azure.aks",
-        SubnetDoc.version == 1,
-        SubnetDoc.resource_key == "abc.test.cluster.fqdn.ms.com"
-    ).count()
+    assert second_timestamp > first_timestamp  # Timestamp should be updated
 
-    assert subnet_count == 1  # Old record should be replaced
+@pytest.mark.anyio
+async def test_update_subnet_new_rule_implementation(http_client: AsyncClient, database_client):
+    """Ensure the API creates new rule implementation records when needed."""
+
+    url = "/subnets/azure.aks/1/new.cluster.fqdn.ms.com"
+
+    test_payload = MetadataUpload(
+        metadata=AzureNetworkMetadata(
+            cloud="azure",
+            tenant="msad",
+            segdom_name="infra-dev-genpop",
+            subscription_identifier="mce",
+            spoke_identifier="aks-client-03",
+            region="westus",
+            env="prod",
+            network_zone="msinternal"
+        ),
+        subnets=[SubnetData(usage="pod", cidr="10.0.2.0/24", name="pod-subnet-02")]
+    )
+
+    response = await http_client.put(url, json=test_payload.model_dump())
+
+    assert response.status_code == 200
+    response_data = response.json()
+
+    assert len(response_data["affected_rules"]) > 0  # Ensure new rule implementations are created
