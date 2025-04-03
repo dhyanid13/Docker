@@ -1,0 +1,75 @@
+import pytest
+from httpx import AsyncClient
+from datetime import datetime
+from ms.plexus.api.firewall.model import RuleImplementationStateDoc  # Assuming correct import
+
+@pytest.mark.asyncio
+async def test_get_rule_state_valid(http_client: AsyncClient):
+    """Test retrieving a valid rule state document."""
+
+    # ✅ Insert mock rule into DB
+    rule_doc = RuleImplementationStateDoc(
+        rule_name="aks_nodes",
+        firewall_name="azurefirewall-nonprod-000",
+        rtype="azure_acl_group",
+        target_timestamp=datetime.utcnow(),
+        current_timestamp=datetime(1970, 1, 1),
+        lifecycle="requested"
+    )
+    await rule_doc.insert()
+
+    url = f"/azurefirewall-nonprod-000/aks_nodes"
+    response = await http_client.get(url)
+    
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["rule_name"] == "aks_nodes"
+    assert data["firewall_name"] == "azurefirewall-nonprod-000"
+    assert data["rtype"] == "azure_acl_group"
+    assert isinstance(data["target_timestamp"], str)
+    assert isinstance(data["current_timestamp"], str)
+    assert data["lifecycle"] == "requested"
+
+@pytest.mark.asyncio
+async def test_get_rule_state_different_region(http_client: AsyncClient):
+    """Test fetching rule state from another firewall region."""
+
+    rule_doc = RuleImplementationStateDoc(
+        rule_name="aks_nodes",
+        firewall_name="azurefirewall-westus-001",
+        rtype="azure_acl_group",
+        target_timestamp=datetime.utcnow(),
+        current_timestamp=datetime(1970, 1, 1),
+        lifecycle="requested"
+    )
+    await rule_doc.insert()
+
+    url = f"/azurefirewall-westus-001/aks_nodes"
+    response = await http_client.get(url)
+    
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["rule_name"] == "aks_nodes"
+    assert data["firewall_name"] == "azurefirewall-westus-001"
+
+@pytest.mark.asyncio
+async def test_get_rule_state_not_found(http_client: AsyncClient):
+    """Test fetching rule state for a non-existent rule."""
+
+    url = f"/azurefirewall-nonprod-000/nonexistent_rule"
+    response = await http_client.get(url)
+    
+    assert response.status_code == 404
+    assert response.json()["detail"] == "No such rule state logged"
+
+@pytest.mark.asyncio
+async def test_get_rule_state_firewall_not_found(http_client: AsyncClient):
+    """Test fetching rule state for an existing rule in a non-existent firewall."""
+
+    url = f"/nonexistent_firewall/aks_nodes"
+    response = await http_client.get(url)
+    
+    assert response.status_code == 404
+    assert response.json()["detail"] == "No such rule state logged"
