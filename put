@@ -1,0 +1,86 @@
+import pytest
+from httpx import AsyncClient
+from datetime import datetime, timedelta
+from ms.plexus.api.firewall.model import RuleImplementationStateDoc, RuleImplementationUpdate
+
+@pytest.mark.asyncio
+async def test_update_rule_state_valid(http_client: AsyncClient):
+    """Test updating current_timestamp successfully."""
+
+    existing_rule = RuleImplementationStateDoc(
+        rule_name="aks_nodes",
+        firewall_name="azurefirewall-nonprod-000",
+        rtype="azure_acl_group",
+        current_timestamp=datetime.utcnow(),
+        target_timestamp=datetime.utcnow() + timedelta(days=1),
+        lifecycle="requested"
+    )
+    await existing_rule.insert()
+
+    new_timestamp = datetime.utcnow() + timedelta(minutes=10)
+
+    url = f"/azurefirewall-nonprod-000/aks_nodes"
+    response = await http_client.put(url, json={"current_timestamp": new_timestamp.isoformat()})
+
+    assert response.status_code == 200
+    data = response.json()
+    
+    assert data["current_timestamp"] == new_timestamp.isoformat()
+
+@pytest.mark.asyncio
+async def test_update_rule_state_lifecycle_transition(http_client: AsyncClient):
+    """Test lifecycle transition from requested → active."""
+
+    existing_rule = RuleImplementationStateDoc(
+        rule_name="aks_nodes",
+        firewall_name="azurefirewall-nonprod-000",
+        rtype="azure_acl_group",
+        current_timestamp=datetime.utcnow(),
+        target_timestamp=datetime.utcnow() + timedelta(days=1),
+        lifecycle="requested"
+    )
+    await existing_rule.insert()
+
+    new_timestamp = datetime.utcnow() + timedelta(minutes=10)
+
+    url = f"/azurefirewall-nonprod-000/aks_nodes"
+    response = await http_client.put(url, json={"current_timestamp": new_timestamp.isoformat()})
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["lifecycle"] == "active"
+
+@pytest.mark.asyncio
+async def test_update_rule_state_not_found(http_client: AsyncClient):
+    """Test updating rule state for a non-existent rule."""
+
+    new_timestamp = datetime.utcnow() + timedelta(minutes=10)
+
+    url = f"/azurefirewall-nonprod-000/nonexistent_rule"
+    response = await http_client.put(url, json={"current_timestamp": new_timestamp.isoformat()})
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "No such rule state logged"
+
+@pytest.mark.asyncio
+async def test_update_rule_state_earlier_timestamp(http_client: AsyncClient):
+    """Test updating current_timestamp with an earlier value (should fail)."""
+
+    existing_rule = RuleImplementationStateDoc(
+        rule_name="aks_nodes",
+        firewall_name="azurefirewall-nonprod-000",
+        rtype="azure_acl_group",
+        current_timestamp=datetime.utcnow(),
+        target_timestamp=datetime.utcnow() + timedelta(days=1),
+        lifecycle="requested"
+    )
+    await existing_rule.insert()
+
+    earlier_timestamp = existing_rule.current_timestamp - timedelta(minutes=10)
+
+    url = f"/azurefirewall-nonprod-000/aks_nodes"
+    response = await http_client.put(url, json={"current_timestamp": earlier_timestamp.isoformat()})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Cannot set timestamp to a value earlier than current timestamp"
