@@ -1,0 +1,90 @@
+📄 Postmortem Report
+Overview
+On March 15th, 2025, the Plexus application in production failed due to expired Kerberos tickets, resulting in 503 errors during client pipeline runs. Although a weekly restart is in place to renew tickets, a recent Unix Ops configuration change exposed a flaw in how the Kerberos config was mounted in the container. This prevented ticket renewal. The issue was resolved with a manual restart, and permanent fixes are in progress.
+
+What Happened
+We have a pipeline called Skooby that clients use to create, upgrade, and destroy their clusters. This pipeline internally calls Plexus, a Dockerized internal tool that requires valid Kerberos tickets to make authenticated API calls.
+
+To ensure tickets remain valid, Plexus is automatically restarted every Sunday. This renewal ensures that the Kerberos tickets, which have a 7-day validity, are refreshed on time and do not expire.
+
+However, on March 15th at 7:07 PM, a client ran the Skooby pipeline against a production cluster, during which Plexus returned 503 errors. Logs revealed that the Kerberos tickets had expired, which was unexpected as the restart schedule was in place and supposed to handle this.
+
+This prompted an immediate investigation.
+
+Resolution
+The on-call engineer for the weekend shift was alerted and took immediate action to manually restart Plexus via Leela, our internal portal that manages application lifecycles. As Plexus is a production service, the restart required TAP (Technical Approval Process) approval from senior management, which was obtained.
+
+After the restart, Kerberos tickets were successfully refreshed, and the application resumed normal operations. This unblocked the client's pipeline and restored the production environment.
+
+Root Causes
+Given the unusual nature of the incident, there were two initial hypotheses:
+
+Scheduled Restart Failure:
+We first suspected that the automatic restart might not have occurred the previous Sunday. To investigate, logs from the previous week were reviewed, and confirmation was obtained from the Zappy team, which verified that the restart had indeed been completed successfully.
+
+Kerberos Misconfiguration:
+The next theory was that the Kerberos tickets were not being properly injected into the Plexus container. While debugging this path, we reached out to the Unix Ops team, who pointed out a critical flaw:
+The Plexus container was not properly mounting the /etc/krb5.conf file.
+
+Due to this misconfiguration, when Unix Ops pushed a TCM (Template Change Management) update to modify the krb5.conf file (to point to RHEL8 KDCs), the change was not reflected inside the container. This resulted in the container being unable to access valid Kerberos KDCs, and the tickets effectively vanished from the runtime environment, even though the restart happened as expected.
+
+Impact
+The Plexus application in production was affected across the board.
+
+After the TCM update from Unix Ops, all production AFS cells running Plexus faced similar Kerberos issues.
+
+As a result, Skooby pipelines failed for clients, as API calls to Plexus were unauthenticated and returned 503 errors.
+
+While recovery was prompt, the issue temporarily blocked production workflows and required escalation and manual intervention.
+
+What Went Well
+Timely On-Call Response: The on-call engineer responded promptly and effectively.
+
+Fast Recovery: Manual restart via Leela (with TAP approval) was executed quickly.
+
+Minimal Downtime: Operations were not hindered for a prolonged period, and the client’s workflow was unblocked shortly after the issue was identified.
+
+Clear Logs: The Kerberos expiration logs provided immediate direction for triaging the root cause.
+
+What Didn't Go Well
+Kerberos Configuration Was Not Mounted Properly: The Plexus container lacked the correctly mounted /etc/krb5.conf, preventing access to updated KDC info.
+
+No Visibility Into Infra-Level Changes: The application team had no prior visibility into the TCM pushed by Unix Ops, which was critical to maintaining authentication.
+
+No Post-Restart Verification: There was no built-in mechanism to verify whether Kerberos ticket renewal succeeded after the scheduled restart.
+
+No Monitoring on Ticket Expiry: The absence of alerts for expired or missing Kerberos tickets meant the issue only surfaced during a client-triggered pipeline run.
+
+Action Items
+Hotfix Implementation:
+
+Coordinated with the Unix Ops team to get insight into upcoming TCMs.
+
+Introduced additional restart schedules around known change windows to reduce the risk of premature ticket expiration.
+
+Permanent Fix:
+
+Created JIRA tickets to correct the Kerberos configuration issue in Plexus.
+
+The application will now mount /etc/krb5.conf properly, ensuring updates are reflected inside the container and Kerberos operates as expected.
+
+Operational Improvements:
+
+Align closer with Unix Ops on change management that affects auth systems.
+
+Improve application container setup consistency to avoid similar mounting errors.
+
+How Could We Have Discovered This Issue Faster
+Kerberos Ticket Health Checks: Periodic checks within the container could have alerted us to missing or expired Kerberos tickets earlier.
+
+Post-Restart Validations: A lightweight script or readiness probe could have validated Kerberos auth post-scheduled restarts.
+
+Auth Failure Alerting: Adding monitoring for recurring 503s tied to Kerberos errors would have surfaced the issue proactively.
+
+How Could We Have Prevented the Issue from Occurring
+Correct Kerberos Mounting: Ensuring /etc/krb5.conf is correctly mounted in all container deployments would have absorbed the TCM change without issue.
+
+Pre-Change Coordination: Establishing communication channels and review processes for critical infra-level TCMs can help anticipate application-level fallout.
+
+Automated Validation Pipelines: Adding validation for ticket acquisition and auth health as part of the app startup or deployment process could have preemptively blocked bad configurations.
+
