@@ -1,86 +1,356 @@
-import pytest
-from httpx import AsyncClient
-from datetime import datetime, timedelta
-from ms.plexus.api.firewall.model import RuleImplementationStateDoc, RuleImplementationUpdate
-
-@pytest.mark.asyncio
-async def test_update_rule_state_valid(http_client: AsyncClient):
-    """Test updating current_timestamp successfully."""
-
-    existing_rule = RuleImplementationStateDoc(
-        rule_name="aks_nodes",
-        firewall_name="azurefirewall-nonprod-000",
-        rtype="azure_acl_group",
-        current_timestamp=datetime.utcnow(),
-        target_timestamp=datetime.utcnow() + timedelta(days=1),
-        lifecycle="requested"
+async def test_first_time_insert(http_client, test_db):
+    # Insert dummy RuleSetDoc
+    await RuleSetDoc.insert_one(
+        RuleSetDoc(
+            kind="azure.aks",
+            usage="node",
+            name="aks_nodes",
+            rtype="azure_acl_group"
+        )
     )
-    await existing_rule.insert()
-
-    new_timestamp = datetime.utcnow() + timedelta(minutes=10)
-
-    url = f"/azurefirewall-nonprod-000/aks_nodes"
-    response = await http_client.put(url, json={"current_timestamp": new_timestamp.isoformat()})
-
-    assert response.status_code == 200
-    data = response.json()
     
-    assert data["current_timestamp"] == new_timestamp.isoformat()
+    # Payload
+    payload = {
+        "metadata": {
+            "cloud": "azure",
+            "region": "eastus2",
+            "env": "dev",
+            "tenant": "msad",
+            "network_zone": "msinternal",
+            "segdom_name": "infra-dev-genpor",
+            "subscription_identifier": "mce",
+            "spoke_identifier": "aks-client-03"
+        },
+        "subnets": [{
+            "usage": "node",
+            "cidr": "0.0.0.0/24",
+            "name": "node-subnet-01"
+        }]
+    }
 
-@pytest.mark.asyncio
-async def test_update_rule_state_lifecycle_transition(http_client: AsyncClient):
-    """Test lifecycle transition from requested → active."""
-
-    existing_rule = RuleImplementationStateDoc(
-        rule_name="aks_nodes",
-        firewall_name="azurefirewall-nonprod-000",
-        rtype="azure_acl_group",
-        current_timestamp=datetime.utcnow(),
-        target_timestamp=datetime.utcnow() + timedelta(days=1),
-        lifecycle="requested"
-    )
-    await existing_rule.insert()
-
-    new_timestamp = datetime.utcnow() + timedelta(minutes=10)
-
-    url = f"/azurefirewall-nonprod-000/aks_nodes"
-    response = await http_client.put(url, json={"current_timestamp": new_timestamp.isoformat()})
-
+    # Call the API
+    response = await http_client.put("/azure.aks/1/abc.test.cluster.fqdn.ms.com", json=payload)
     assert response.status_code == 200
+
+    # Validate response
     data = response.json()
+    assert "affected_rules" in data
+    assert len(data["affected_rules"]) == 1
 
-    assert data["lifecycle"] == "active"
-
-@pytest.mark.asyncio
-async def test_update_rule_state_not_found(http_client: AsyncClient):
-    """Test updating rule state for a non-existent rule."""
-
-    new_timestamp = datetime.utcnow() + timedelta(minutes=10)
-
-    url = f"/azurefirewall-nonprod-000/nonexistent_rule"
-    response = await http_client.put(url, json={"current_timestamp": new_timestamp.isoformat()})
-
-    assert response.status_code == 404
-    assert response.json()["detail"] == "No such rule state logged"
-
-@pytest.mark.asyncio
-async def test_update_rule_state_earlier_timestamp(http_client: AsyncClient):
-    """Test updating current_timestamp with an earlier value (should fail)."""
-
-    existing_rule = RuleImplementationStateDoc(
-        rule_name="aks_nodes",
-        firewall_name="azurefirewall-nonprod-000",
-        rtype="azure_acl_group",
-        current_timestamp=datetime.utcnow(),
-        target_timestamp=datetime.utcnow() + timedelta(days=1),
-        lifecycle="requested"
+    # Check RuleImplementationStateDoc was created
+    rule_record = await RuleImplementationStateDoc.find_one(
+        RuleImplementationStateDoc.rule_name == "aks_nodes",
+        RuleImplementationStateDoc.firewall_name == "azurefirewall-nonprod-000"
     )
-    await existing_rule.insert()
+    assert rule_record is not None
+    assert rule_record.lifecycle == RuleImplementationLifecycle.requested
+    assert rule_record.current_timestamp == 0
 
-    earlier_timestamp = existing_rule.current_timestamp - timedelta(minutes=10)
 
-    url = f"/azurefirewall-nonprod-000/aks_nodes"
-    response = await http_client.put(url, json={"current_timestamp": earlier_timestamp.isoformat()})
+async def test_update_existing_rule_implementation(http_client, test_db):
+    # Step 1: First insert with initial CIDR
+    await RuleSetDoc.insert_one(
+        RuleSetDoc(
+            kind="azure.aks",
+            usage="node",
+            name="aks_nodes",
+            rtype="azure_acl_group"
+        )
+    )
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == "Cannot set timestamp to a value earlier than current timestamp"
+    initial_payload = {
+        "metadata": {
+            "cloud": "azure",
+            "region": "eastus2",
+            "env": "dev",
+            "tenant": "msad",
+            "network_zone": "msinternal",
+            "segdom_name": "infra-dev-genpor",
+            "subscription_identifier": "mce",
+            "spoke_identifier": "aks-client-03"
+        },
+        "subnets": [{
+            "usage": "node",
+            "cidr": "0.0.0.0/24",
+            "name": "node-subnet-01"
+        }]
+    }
+
+    initial_response = await http_client.put("/azure.aks/1/abc.test.cluster.fqdn.ms.com", json=initial_payload)
+    assert initial_response.status_code == 200
+
+    initial_rule = await RuleImplementationStateDoc.find_one(
+        RuleImplementationStateDoc.rule_name == "aks_nodes",
+        RuleImplementationStateDoc.firewall_name == "azurefirewall-nonprod-000"
+    )
+    assert initial_rule is not None
+    old_timestamp = initial_rule.target_timestamp
+
+    # Step 2: Updated insert with a different CIDR
+    updated_payload = {
+        "metadata": initial_payload["metadata"],
+        "subnets": [{
+            "usage": "node",
+            "cidr": "10.0.0.0/24",  # <- Changed CIDR
+            "name": "node-subnet-01"
+        }]
+    }
+
+    updated_response = await http_client.put("/azure.aks/1/abc.test.cluster.fqdn.ms.com", json=updated_payload)
+    assert updated_response.status_code == 200
+
+    updated_data = updated_response.json()
+    assert len(updated_data["affected_rules"]) == 1
+
+    updated_rule = await RuleImplementationStateDoc.find_one(
+        RuleImplementationStateDoc.rule_name == "aks_nodes",
+        RuleImplementationStateDoc.firewall_name == "azurefirewall-nonprod-000"
+    )
+    assert updated_rule is not None
+    assert updated_rule.target_timestamp > old_timestamp  # Timestamp should be updated
+
+    # Check that SubnetDoc now reflects the new CIDR and old one is gone
+    subnets = await SubnetDoc.find_all().to_list()
+    assert len(subnets) == 1
+    assert str(subnets[0].subnets[0].cidr) == "10.0.0.0/24"
+
+
+async def test_multiple_regions_envs_and_usages(http_client, test_db):
+    # Insert multiple dummy RuleSetDocs for different usages
+    await RuleSetDoc.insert_many([
+        RuleSetDoc(kind="azure.aks", usage="node", name="aks_nodes", rtype="azure_acl_group"),
+        RuleSetDoc(kind="azure.aks", usage="pod", name="aks_pods", rtype="azure_acl_group"),
+        RuleSetDoc(kind="azure.aks", usage="service", name="aks_services", rtype="azure_acl_group")
+    ])
+
+    common_metadata = {
+        "cloud": "azure",
+        "tenant": "msad",
+        "network_zone": "msinternal",
+        "segdom_name": "infra-dev-genpor",
+        "subscription_identifier": "mce",
+        "spoke_identifier": "aks-client-03"
+    }
+
+    # First insert (Region: eastus2, Env: dev)
+    initial_payload = {
+        "metadata": {**common_metadata, "region": "eastus2", "env": "dev"},
+        "subnets": [
+            {"usage": "node", "cidr": "10.1.0.0/24", "name": "node-subnet-01"},
+            {"usage": "pod", "cidr": "10.1.1.0/24", "name": "pod-subnet-01"},
+        ]
+    }
+
+    res1 = await http_client.put("/azure.aks/1/abc.test.cluster.fqdn.ms.com", json=initial_payload)
+    assert res1.status_code == 200
+    affected_rules_1 = res1.json()["affected_rules"]
+    assert len(affected_rules_1) == 2
+
+    # Second insert (Region: centralus, Env: qa) — new firewall match
+    second_payload = {
+        "metadata": {**common_metadata, "region": "centralus", "env": "qa"},
+        "subnets": [
+            {"usage": "service", "cidr": "10.2.0.0/24", "name": "svc-subnet-01"},
+        ]
+    }
+
+    res2 = await http_client.put("/azure.aks/1/abc.test.cluster.fqdn.ms.com", json=second_payload)
+    assert res2.status_code == 200
+    affected_rules_2 = res2.json()["affected_rules"]
+    assert len(affected_rules_2) == 1
+
+    # Collect ruleset-firewall pairs to validate RuleImplementationStateDoc
+    all_expected_rules = set([
+        ("aks_nodes", "azurefirewall-nonprod-000"),
+        ("aks_pods", "azurefirewall-nonprod-000"),
+        ("aks_services", "azurefirewall-nonprod-001")  # Assuming different firewall config for centralus/qa
+    ])
+
+    for rule_name, firewall_name in all_expected_rules:
+        rule_doc = await RuleImplementationStateDoc.find_one(
+            RuleImplementationStateDoc.rule_name == rule_name,
+            RuleImplementationStateDoc.firewall_name == firewall_name
+        )
+        assert rule_doc is not None
+        assert rule_doc.lifecycle == RuleImplementationLifecycle.requested
+        assert rule_doc.target_timestamp is not None
+
+    # Check that only the latest SubnetDoc entries exist
+    subnet_docs = await SubnetDoc.find_all().to_list()
+    assert len(subnet_docs) == 1
+    subnets_in_doc = subnet_docs[0].subnets
+    cidrs = [str(s.cidr) for s in subnets_in_doc]
+    assert set(cidrs) == {"10.2.0.0/24"}  # Only the second insert should remain
+
+
+
+async def test_no_matching_firewall_scope(http_client, test_db):
+    # Insert a valid ruleset
+    await RuleSetDoc.insert_one(RuleSetDoc(kind="azure.aks", usage="node", name="aks_nodes", rtype="azure_acl_group"))
+
+    # Use metadata that won’t match any firewall scope from static config
+    unmatched_payload = {
+        "metadata": {
+            "cloud": "azure",
+            "region": "nonexistent-region",
+            "env": "staging",
+            "tenant": "unknown-tenant",
+            "network_zone": "external",
+            "segdom_name": "some-segdom",
+            "subscription_identifier": "does-not-exist",
+            "spoke_identifier": "random-spoke"
+        },
+        "subnets": [{
+            "usage": "node",
+            "cidr": "192.168.100.0/24",
+            "name": "node-subnet-unmatched"
+        }]
+    }
+
+    response = await http_client.put("/azure.aks/1/abc.test.cluster.fqdn.ms.com", json=unmatched_payload)
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["affected_rules"] == []
+
+    # Ensure no RuleImplementationStateDoc got created
+    count = await RuleImplementationStateDoc.count_documents()
+    assert count == 0
+
+    # Ensure no SubnetDoc was inserted either
+    subnet_count = await SubnetDoc.count_documents()
+    assert subnet_count == 0
+
+
+async def test_ruleset_with_unsupported_rtype(http_client, test_db):
+    # Insert a ruleset with a rtype that is NOT in the firewall's supported rtype list
+    await RuleSetDoc.insert_one(RuleSetDoc(kind="azure.aks", usage="node", name="aks_nodes_invalid_rtype", rtype="unsupported_rtype"))
+
+    # Use metadata that WILL match a firewall's scope
+    valid_scope_payload = {
+        "metadata": {
+            "cloud": "azure",
+            "region": "eastus2",  # assuming this matches static config
+            "env": "dev",
+            "tenant": "msad",
+            "network_zone": "msinternal",
+            "segdom_name": "infra-dev-genpor",
+            "subscription_identifier": "mce",
+            "spoke_identifier": "aks-client-03"
+        },
+        "subnets": [{
+            "usage": "node",
+            "cidr": "10.10.10.0/24",
+            "name": "node-subnet-invalid-rtype"
+        }]
+    }
+
+    response = await http_client.put("/azure.aks/1/abc.test.cluster.fqdn.ms.com", json=valid_scope_payload)
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["affected_rules"] == []
+
+    # No RuleImplementationStateDoc should be created
+    rule = await RuleImplementationStateDoc.find_one(
+        RuleImplementationStateDoc.rule_name == "aks_nodes_invalid_rtype"
+    )
+    assert rule is None
+
+    # No SubnetDoc should be inserted
+    subnet_count = await SubnetDoc.count_documents()
+    assert subnet_count == 0
+
+
+async def test_cidr_update_replaces_old_subnet(http_client, test_db):
+    # Insert required ruleset
+    await RuleSetDoc.insert_one(RuleSetDoc(kind="azure.aks", usage="node", name="aks_nodes", rtype="azure_acl_group"))
+
+    metadata = {
+        "cloud": "azure",
+        "region": "eastus2",
+        "env": "dev",
+        "tenant": "msad",
+        "network_zone": "msinternal",
+        "segdom_name": "infra-dev-genpor",
+        "subscription_identifier": "mce",
+        "spoke_identifier": "aks-client-03"
+    }
+
+    # First insert
+    payload_v1 = {
+        "metadata": metadata,
+        "subnets": [{
+            "usage": "node",
+            "cidr": "10.0.0.0/24",
+            "name": "node-subnet-old"
+        }]
+    }
+
+    res1 = await http_client.put("/azure.aks/1/my.cluster.fqdn.com", json=payload_v1)
+    assert res1.status_code == 200
+    affected_1 = res1.json()["affected_rules"]
+    assert len(affected_1) == 1
+
+    # Second insert with new CIDR for same subnet usage
+    payload_v2 = {
+        "metadata": metadata,
+        "subnets": [{
+            "usage": "node",
+            "cidr": "10.0.1.0/24",
+            "name": "node-subnet-new"
+        }]
+    }
+
+    res2 = await http_client.put("/azure.aks/1/my.cluster.fqdn.com", json=payload_v2)
+    assert res2.status_code == 200
+    affected_2 = res2.json()["affected_rules"]
+    assert len(affected_2) == 1
+
+    # Only the second subnet should be present
+    subnet_docs = await SubnetDoc.find_all().to_list()
+    assert len(subnet_docs) == 1
+    subnets = subnet_docs[0].subnets
+    assert len(subnets) == 1
+    assert str(subnets[0].cidr) == "10.0.1.0/24"
+    assert subnets[0].name == "node-subnet-new"
+
+
+async def test_partial_subnet_application(http_client, test_db):
+    # Only insert ruleset for 'node'
+    await RuleSetDoc.insert_one(RuleSetDoc(kind="azure.aks", usage="node", name="aks_nodes", rtype="azure_acl_group"))
+
+    payload = {
+        "metadata": {
+            "cloud": "azure",
+            "region": "eastus2",
+            "env": "dev",
+            "tenant": "msad",
+            "network_zone": "msinternal",
+            "segdom_name": "infra-dev-genpor",
+            "subscription_identifier": "mce",
+            "spoke_identifier": "aks-client-03"
+        },
+        "subnets": [
+            {"usage": "node", "cidr": "10.1.0.0/24", "name": "node-subnet"},
+            {"usage": "db", "cidr": "10.1.1.0/24", "name": "db-subnet"}  # No ruleset for this
+        ]
+    }
+
+    response = await http_client.put("/azure.aks/1/cluster.partial.com", json=payload)
+    assert response.status_code == 200
+    affected = response.json()["affected_rules"]
+    assert len(affected) == 1
+    assert affected[0]["rule_name"] == "aks_nodes"
+
+    # SubnetDoc should only include the 'node' subnet
+    subnet_docs = await SubnetDoc.find_all().to_list()
+    assert len(subnet_docs) == 1
+    subnets = subnet_docs[0].subnets
+    assert len(subnets) == 1
+    assert subnets[0].usage == "node"
+    assert str(subnets[0].cidr) == "10.1.0.0/24"
+
+
+
+
