@@ -1,0 +1,60 @@
+Overview
+On March 15th, 2025, the Plexus application in production failed due to expired Kerberos tickets, resulting in 503 errors during client pipeline runs. Although a weekly restart is in place to renew tickets, a recent Unix Ops configuration change exposed a flaw in how the Kerberos config was mounted in the container. This prevented ticket renewal. The issue was resolved with a manual restart, and permanent fixes are in progress.
+
+What Happened
+On March 15th at 7:07 PM, a client-initiated run of the Skooby pipeline—used to create, upgrade, and destroy clusters—failed when API calls to Plexus returned 503 Service Unavailable errors. Plexus logs indicated that Kerberos tickets had expired, which should not have occurred due to an existing weekly automated restart that refreshes tickets.
+
+This unexpected behavior suggested that the ticket renewal mechanism had failed silently.
+
+Resolution
+The incident was escalated to the weekend on-call engineer, who manually restarted the Plexus application via Leela, the internal application portal. This required TAP (Technical Approval Process) approval from senior management. The restart successfully renewed the Kerberos tickets and restored functionality to the Skooby pipeline.
+
+Root Causes
+Initial investigation ruled out failure of the scheduled restart, which had occurred successfully the prior weekend (confirmed via logs and the Zappy team).
+
+Focus then shifted to the Kerberos configuration within the container. After debugging and consulting the Unix Ops team, it was discovered that the Plexus container was not properly mounting the /etc/krb5.conf file. As a result, when the Unix Ops team rolled out a TCM update to point Kerberos to RHEL8 KDCs, the change was not reflected in the container.
+
+This misconfiguration prevented the container from generating valid Kerberos tickets, ultimately leading to expired or missing credentials and causing Plexus to fail authentication and return 503 errors.
+
+Impact
+All production instances of Plexus were affected following the TCM update.
+
+Clients using the Skooby pipeline for cluster operations in production were unable to proceed due to repeated 503 errors.
+
+The issue caused temporary disruption in production workflows, requiring manual intervention for recovery.
+
+What Went Well
+Timely response by the on-call engineer ensured rapid identification and mitigation.
+
+The application was restarted quickly with TAP approvals, restoring service within a short window.
+
+Client impact was minimized due to prompt recovery actions.
+
+What Didn't Go Well
+The Kerberos configuration (/etc/krb5.conf) was not mounted correctly, leading to an undetected failure in ticket renewal.
+
+There was no prior awareness of the TCM changes by the application team.
+
+Lack of monitoring or alerting around Kerberos ticket status within the container delayed detection until failure occurred.
+
+Action Items
+🔧 Hotfix: Additional restart schedules were temporarily added based on upcoming TCMs shared by Unix Ops to avoid ticket expiry before a fix was in place.
+
+🛠️ Permanent Fix: JIRA tickets have been created to properly mount the Kerberos configuration file inside the Plexus container, ensuring it reflects system-level updates.
+
+🤝 Coordination: Improve collaboration and communication channels with infrastructure teams for visibility into planned config changes.
+
+How Could We Have Discovered This Issue Faster
+Implementing health checks or periodic validation for Kerberos ticket presence and validity inside containers.
+
+Adding a post-restart validation step to ensure successful ticket renewal.
+
+Establishing alerts for repeated authentication failures or 503 errors tied to Kerberos usage.
+
+How Could We Have Prevented the Issue from Occurring
+Ensuring proper and consistent mounting of /etc/krb5.conf in all deployments.
+
+Establishing stronger change coordination between application and infrastructure teams for high-impact config updates.
+
+Adding automated validation mechanisms post-deployment to verify Kerberos setup integrity and ticket renewal behavior.
+
